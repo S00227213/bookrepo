@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HealthBuddy – Appointment Booking</title>
+  <style>
+    body { font-family:'Segoe UI',sans-serif; background:#f7f9fc; margin:0; padding:20px; display:flex; flex-direction:column; align-items:center; }
+    h1 { color:#2e86de; margin-bottom:20px; }
+    .login-btn { background:#28a745; color:#fff; padding:10px 16px; border:none; border-radius:6px; text-decoration:none; font-weight:bold; margin-bottom:20px; }
+    .login-btn:hover { background:#1f8b3f; }
+    .container { background:#fff; padding:25px 30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1); width:100%; max-width:500px; box-sizing:border-box; }
+    label { display:block; margin-top:15px; font-weight:bold; }
+    textarea { width:100%; padding:10px; margin-top:5px; border:1px solid #ccc; border-radius:6px; resize:vertical; }
+    button { margin-top:20px; padding:12px 18px; background:#2e86de; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+    button:hover { background:#1b66c9; }
+    pre { background:#eef2f7; padding:15px; border-radius:8px; margin-top:20px; width:100%; max-width:500px; white-space:pre-wrap; word-break:break-word; }
+  </style>
+</head>
+<body>
+
+  <h1>HealthBuddy – Appointment Booking</h1>
+
+  <a id="login" class="login-btn"
+  href="https://us-east-1okylzjlyi.auth.us-east-1.amazoncognito.com/login?
+client_id=4ohmj3tlv0ftsqoutbcerraf9
+&response_type=token
+&scope=email+openid
+&redirect_uri=http://healthbuddy-frontend-new.s3-website-us-east-1.amazonaws.com/book.html">
+ Log in with Cognito
+</a>
+
+
+  <div class="container">
+    <label for="symptoms">Describe your symptoms:</label>
+    <textarea id="symptoms" rows="4" placeholder="e.g., sore throat and fatigue"></textarea>
+    <button id="submit" type="button">Submit Booking</button>
+  </div>
+
+  <pre id="output">Please log in and describe your symptoms to book an appointment.</pre>
+
+  <script>
+    function parseJwt(token) {
+      const base64Url = token.split('.')[1];
+      const base64    = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const json      = decodeURIComponent(atob(base64).split('').map(c =>
+        '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
+      ).join(''));
+      return JSON.parse(json);
+    }
+    const loginBtn  = document.getElementById('login');
+    const submitBtn = document.getElementById('submit');
+    const outputEl  = document.getElementById('output');
+    let idToken, user;
+    if (window.location.hash.includes('id_token=')) {
+      const parts = window.location.hash
+        .substring(1)
+        .split('&')
+        .map(p => p.split('='));
+      idToken = parts.find(p => p[0] === 'id_token')[1];
+      user    = parseJwt(idToken);
+
+      // Show logged‑in state
+      loginBtn.textContent = `Logged in: ${user.email}`;
+      loginBtn.style.backgroundColor = '#6c757d';
+      loginBtn.href = '#';
+      outputEl.textContent = '';
+
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+
+    // 2) Booking click
+    submitBtn.addEventListener('click', async () => {
+      outputEl.textContent = '';
+      if (!idToken) {
+        outputEl.textContent = 'You must log in first.';
+        return;
+      }
+
+      const symptoms = document.getElementById('symptoms').value.trim();
+      if (!symptoms) {
+        outputEl.textContent = 'Please enter your symptoms.';
+        return;
+      }
+
+      outputEl.textContent = 'Submitting your booking…';
+
+      try {
+        // Primary booking (us‑east‑1)
+        const resp = await fetch(
+          'https://vihikfl1ke.execute-api.us-east-1.amazonaws.com/prod/book',
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${idToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ symptoms })
+          }
+        );
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          outputEl.textContent = `Booking failed (${resp.status}):\n\n`
+                               + JSON.stringify(data, null, 2);
+          return;
+        }
+
+        outputEl.textContent = ':) Booking successful:\n\n'
+                             + JSON.stringify(data, null, 2)
+                             + '\n\nRunning cross‑region status check…';
+
+        // Cross‑region check (us‑west‑2)
+        const statusResp = await fetch(
+          'https://omsjbwk2odghop5hrmwrnbzimm0pgzts.lambda-url.us-west-2.on.aws/',
+          { method: 'GET' }
+        );
+        const statusData = await statusResp.json();
+
+        outputEl.textContent += '\n\nRegion check result:\n'
+                             + JSON.stringify(statusData, null, 2);
+
+      } catch (err) {
+        console.error(err);
+        outputEl.textContent = 'An error occurred: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>
